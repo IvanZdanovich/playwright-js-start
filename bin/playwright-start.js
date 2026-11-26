@@ -33,7 +33,7 @@ const OPTIONAL_MODULES = {
     files: ['eslint-plugin-custom-rules/', 'eslint.config.mjs', 'scripts/setup-git-hooks.js', 'scripts/pre-commit-lint.js', 'scripts/git-exec-lib.js', 'scripts/thresholds.json', '.prettierrc.js', '.prettierignore'],
     scripts: {
       lint: 'eslint . --format stylish --fix',
-      'test:rules': 'node --test eslint-plugin-custom-rules/__tests__',
+      'test:rules': "node --test 'eslint-plugin-custom-rules/__tests__/*.test.js'",
       'hooks:setup': 'node scripts/setup-git-hooks.js',
       // Guarded so `npm install` keeps working if the hook script is later removed.
       postinstall: "node -e \"const fs=require('fs');if(fs.existsSync('scripts/setup-git-hooks.js')){require('child_process').spawnSync(process.execPath,['scripts/setup-git-hooks.js'],{stdio:'inherit'})}\"",

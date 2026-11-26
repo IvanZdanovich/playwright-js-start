@@ -18,7 +18,7 @@
     "test:parallel": "cross-env-shell playwright test --workers=${PARALLEL_STREAMS:-3}",
     "test:api": "playwright test --project=integration-api",
     "test:ui": "playwright test --project=integration-ui --project=e2e-ui",
-    "test:rules": "node --test eslint-plugin-custom-rules/__tests__",
+    "test:rules": "node --test 'eslint-plugin-custom-rules/__tests__/*.test.js'",
     "debug": "playwright test --ui",
     "l10n": "node scripts/l10n.js",
     "l10n:gen-types": "node scripts/l10n.js types",
@@ -58,7 +58,7 @@
     "report:unsuppress-run": "node scripts/manage-flaky-suppressions.js --remove-runs",
     "report:review": "node scripts/manage-flaky-suppressions.js --review",
     "report:signoff": "node scripts/generate-signoff-report.js",
-    "test:cli": "node --test bin/__tests__"
+    "test:cli": "node --test 'bin/__tests__/*.test.js'"
   },
   "author": "Ivan Zdanovich",
   "license": "MIT",

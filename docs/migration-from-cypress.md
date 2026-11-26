@@ -86,7 +86,7 @@ Each item was verified on the source `main` and fixed in the port. The guard kee
 
 ## Scaffolder
 
-`bin/playwright-start.js` is the port of `create-cypress-start` with its 41 tests (`node --test bin/__tests__` in the template repository). The template
+`bin/playwright-start.js` is the port of `create-cypress-start` with its 41 tests (`node --test 'bin/__tests__/*.test.js'` in the template repository). The template
 URL variable is `PLAYWRIGHT_START_TEMPLATE_URL`, and the manifest file is `.playwright-start-manifest.json`.
 
 ## Not ported

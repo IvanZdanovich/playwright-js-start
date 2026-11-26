@@ -68,7 +68,7 @@ function makeMinimalTemplate(parentDir) {
   for (const mod of Object.values(OPTIONAL_MODULES)) {
     Object.assign(scripts, mod.scripts ?? {});
   }
-  scripts['test:cli'] = 'node --test bin/__tests__';
+  scripts['test:cli'] = "node --test 'bin/__tests__/*.test.js'";
   const templatePackage = { name: 'playwright-js-start', version: '5.0.0', bin: { 'create-playwright-start': 'bin/playwright-start.js' }, files: ['bin/playwright-start.js'], private: false, scripts, devDependencies: {} };
   fs.writeFileSync(path.join(tplPath, 'package.json'), JSON.stringify(templatePackage, null, 2) + '\n');
 

@@ -22,7 +22,7 @@ npx create-playwright-start my-project
   credentials and project data files. A `.playwright-start-manifest.json` file records what the template installed.
 
 Set `PLAYWRIGHT_START_TEMPLATE_URL` to scaffold from a fork or a local clone. In the template repository the CLI lives
-in `bin/` and its tests run with `node --test bin/__tests__`; scaffolded projects do not include it.
+in `bin/` and its tests run with `node --test 'bin/__tests__/*.test.js'`; scaffolded projects do not include it.
 
 ### Clone directly
 
