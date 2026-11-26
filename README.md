@@ -21,7 +21,8 @@ npx create-playwright-start my-project
 - **Update** in an existing project applies the latest template, removes files the template dropped, and keeps your
   credentials and project data files. A `.playwright-start-manifest.json` file records what the template installed.
 
-Set `PLAYWRIGHT_START_TEMPLATE_URL` to scaffold from a fork or a local clone.
+Set `PLAYWRIGHT_START_TEMPLATE_URL` to scaffold from a fork or a local clone. In the template repository the CLI lives
+in `bin/` and its tests run with `node --test bin/__tests__`; scaffolded projects do not include it.
 
 ### Clone directly
 
@@ -117,7 +118,6 @@ npm run report:flaky       # flaky-test analysis from the CI ledger → reports/
 npm run lint               # ESLint with auto-fix
 npm run test:rules         # custom lint rule tests
 npm run validate           # guidance and docs reference only existing things
-npm run test:cli           # scaffolder tests
 npm run l10n -- help       # localization CLI
 npm run colours -- help    # colour theme CLI
 ```
