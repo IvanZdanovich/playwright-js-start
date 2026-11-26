@@ -97,9 +97,16 @@ jobs:
       - uses: actions/checkout@v7
       - run: npm ci
       - name: Create sensitive data from secrets
+        env:
+          USERS_JSON: ${{ secrets.DEV_USERS_JSON }}
         run: |
           mkdir -p playwright/sensitive-data
-          echo '${{ secrets.DEV_USERS_JSON }}' > "playwright/sensitive-data/${TARGET_ENV}-users.json"
+          if [ -n "$USERS_JSON" ]; then
+            printf '%s' "$USERS_JSON" > "playwright/sensitive-data/${TARGET_ENV}-users.json"
+          else
+            echo "::warning::DEV_USERS_JSON secret is not set; using the public demo users from env-users.example.json"
+            cp playwright/sensitive-data/env-users.example.json "playwright/sensitive-data/${TARGET_ENV}-users.json"
+          fi
       - name: Run Playwright tests
         run: |
           PROJECTS=""
