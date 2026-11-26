@@ -1,0 +1,413 @@
+import { test, expect } from '../../support/fixtures';
+import { req } from '../../support/req';
+import { userRoles } from '../../constants/user-roles';
+import {
+  restfulBooker__getAuthToken__POST,
+  restfulBooker__createBooking__POST,
+  restfulBooker__getBookingIds__GET,
+  restfulBooker__getBookingById__GET,
+  restfulBooker__updateBooking__PUT,
+  restfulBooker__partialUpdateBooking__PATCH,
+  restfulBooker__deleteBooking__DELETE,
+  restfulBooker__bulkDelete__DELETE,
+} from '../../commands/api/restful-booker.api.commands';
+import { booking__examples as examples } from '../../integration-examples/api/restful-booker.booking.api.examples';
+import { HTTP_STATUS, ERROR_MESSAGE } from '../../constants/api/common.api.constraints';
+import { BAD_CREDENTIALS_REASON, PRICE } from '../../constants/api/rb.booking.api.constraints';
+
+test.describe('RestfulBooker.Booking: Given no preconditions', () => {
+  test.describe.configure({ mode: 'serial' });
+  const cleanUp = ({ apiRequest }) => restfulBooker__bulkDelete__DELETE(apiRequest, { token: examples.auth.token, examples });
+
+  test.beforeAll(async ({ apiRequest, apiToken }) => {
+    examples.auth.token = await apiToken(userRoles.ADMIN_API);
+    await cleanUp({ apiRequest });
+  });
+  test.afterAll(cleanUp);
+
+  test.describe('RestfulBooker.Auth.POST: When invalid credentials are provided', () => {
+    test('RestfulBooker.Auth.POST: Then return 200 status code and reason Bad credentials', req({ bugs: ['BUG-AUTH-001'] }), async ({ apiRequest }) => {
+      const response = await restfulBooker__getAuthToken__POST(apiRequest, examples.authRequests.invalidCredentials);
+      expect(response.status).toBe(HTTP_STATUS.OK);
+      expect(response.body).toHaveProperty('reason');
+      expect(response.body.reason).toBe(BAD_CREDENTIALS_REASON);
+    });
+  });
+
+  test.describe('RestfulBooker.Booking.Create.POST: When valid booking data with all fields is provided', () => {
+    test('RestfulBooker.Booking.Create.POST: Then return 200 status code and booking is created successfully', async ({ apiRequest }) => {
+      const response = await restfulBooker__createBooking__POST(apiRequest, examples.createRequests.withAllFields);
+      expect(response.status).toBe(HTTP_STATUS.OK);
+      expect(response.body).toHaveProperty('bookingid');
+      expect(typeof response.body.bookingid).toBe('number');
+      examples.validBookings.withAllFields.bookingId = response.body.bookingid;
+      expect(response.body.booking.firstname).toBe(examples.validBookings.withAllFields.firstname);
+      expect(response.body.booking.lastname).toBe(examples.validBookings.withAllFields.lastname);
+      expect(response.body.booking.totalprice).toBe(examples.validBookings.withAllFields.totalPrice);
+      expect(response.body.booking.depositpaid).toBe(examples.validBookings.withAllFields.depositPaid);
+      expect(response.body.booking.bookingdates.checkin).toBe(examples.validBookings.withAllFields.bookingDates.checkin);
+      expect(response.body.booking.bookingdates.checkout).toBe(examples.validBookings.withAllFields.bookingDates.checkout);
+      expect(response.body.booking.additionalneeds).toBe(examples.validBookings.withAllFields.additionalNeeds);
+    });
+  });
+
+  test.describe('RestfulBooker.Booking.Create.POST: When booking without optional field is provided', () => {
+    test('RestfulBooker.Booking.Create.POST: Then return 200 status code and additionalneeds is undefined', async ({ apiRequest }) => {
+      const response = await restfulBooker__createBooking__POST(apiRequest, examples.createRequests.withoutAdditionalNeeds);
+      expect(response.status).toBe(HTTP_STATUS.OK);
+      examples.validBookings.withoutAdditionalNeeds.bookingId = response.body.bookingid;
+      expect(response.body.booking.additionalneeds).toBe(undefined);
+    });
+  });
+
+  test.describe('RestfulBooker.Booking.Create.POST: When booking with minimal price is provided', () => {
+    test('RestfulBooker.Booking.Create.POST: Then return 200 status code and booking is created with minimal price', async ({ apiRequest }) => {
+      const response = await restfulBooker__createBooking__POST(apiRequest, examples.createRequests.minimalPrice);
+      expect(response.status).toBe(HTTP_STATUS.OK);
+      examples.validBookings.minimalPrice.bookingId = response.body.bookingid;
+      expect(response.body.booking.totalprice).toBe(PRICE.MIN);
+      expect(response.body.booking.firstname).toBe(examples.validBookings.minimalPrice.firstname);
+      expect(response.body.booking.lastname).toBe(examples.validBookings.minimalPrice.lastname);
+    });
+  });
+
+  test.describe('RestfulBooker.Booking.Create.POST: When booking with maximal price is provided', () => {
+    test('RestfulBooker.Booking.Create.POST: Then return 200 status code and booking is created with maximal price', async ({ apiRequest }) => {
+      const response = await restfulBooker__createBooking__POST(apiRequest, examples.createRequests.maximalPrice);
+      expect(response.status).toBe(HTTP_STATUS.OK);
+      examples.validBookings.maximalPrice.bookingId = response.body.bookingid;
+      expect(response.body.booking.totalprice).toBe(PRICE.MAX);
+      expect(response.body.booking.firstname).toBe(examples.validBookings.maximalPrice.firstname);
+      expect(response.body.booking.lastname).toBe(examples.validBookings.maximalPrice.lastname);
+    });
+  });
+
+  test.describe('RestfulBooker.Booking.Create.POST: When booking with same-day checkout is provided', () => {
+    test('RestfulBooker.Booking.Create.POST: Then return 200 status code and checkin equals checkout date', async ({ apiRequest }) => {
+      const response = await restfulBooker__createBooking__POST(apiRequest, examples.createRequests.sameDayCheckout);
+      expect(response.status).toBe(HTTP_STATUS.OK);
+      examples.validBookings.sameDayCheckout.bookingId = response.body.bookingid;
+      expect(response.body.booking.bookingdates.checkin).toBe(response.body.booking.bookingdates.checkout);
+      expect(response.body.booking.bookingdates.checkin).toBe(examples.validBookings.sameDayCheckout.bookingDates.checkin);
+    });
+  });
+
+  test.describe('RestfulBooker.Booking.Create.POST: When booking with long stay is provided', () => {
+    test('RestfulBooker.Booking.Create.POST: Then return 200 status code and booking is created with extended duration', async ({ apiRequest }) => {
+      const response = await restfulBooker__createBooking__POST(apiRequest, examples.createRequests.longStay);
+      expect(response.status).toBe(HTTP_STATUS.OK);
+      examples.validBookings.longStay.bookingId = response.body.bookingid;
+      expect(response.body.booking.bookingdates.checkin).toBe(examples.validBookings.longStay.bookingDates.checkin);
+      expect(response.body.booking.bookingdates.checkout).toBe(examples.validBookings.longStay.bookingDates.checkout);
+      expect(response.body.booking.totalprice).toBe(examples.validBookings.longStay.totalPrice);
+    });
+  });
+
+  test.describe('RestfulBooker.Booking.Create.POST: When booking with deposit not paid is provided', () => {
+    test('RestfulBooker.Booking.Create.POST: Then return 200 status code and depositpaid is false', async ({ apiRequest }) => {
+      const response = await restfulBooker__createBooking__POST(apiRequest, examples.createRequests.depositNotPaid);
+      expect(response.status).toBe(HTTP_STATUS.OK);
+      examples.validBookings.depositNotPaid.bookingId = response.body.bookingid;
+      expect(response.body.booking.depositpaid).toBe(examples.validBookings.depositNotPaid.depositPaid);
+    });
+  });
+
+  test.describe('RestfulBooker.Booking.Create.POST: When required field is missing', () => {
+    test('RestfulBooker.Booking.Create.POST: Then return 500 status code and Internal Server Error', req({ bugs: ['BUG-BOOKING-002'] }), async ({ apiRequest }) => {
+      const response = await restfulBooker__createBooking__POST(apiRequest, examples.createRequests.missingRequiredField);
+      expect(response.status).toBe(HTTP_STATUS.INTERNAL_SERVER_ERROR);
+      expect(response.body).toBe(ERROR_MESSAGE.INTERNAL_SERVER_ERROR);
+    });
+  });
+
+  test.describe('RestfulBooker.Booking.Create.POST: When invalid data type is provided', () => {
+    test('RestfulBooker.Booking.Create.POST: Then return 200 status code when price is string', req({ bugs: ['BUG-BOOKING-003'] }), async ({ apiRequest }) => {
+      const response = await restfulBooker__createBooking__POST(apiRequest, examples.createRequests.priceAsString);
+      expect(response.status).toBe(HTTP_STATUS.OK);
+      examples.invalidBookings.priceAsString.bookingId = response.body.bookingid;
+    });
+    test('RestfulBooker.Booking.Create.POST: Then return 200 status code when deposit is string', req({ bugs: ['BUG-BOOKING-003'] }), async ({ apiRequest }) => {
+      const response = await restfulBooker__createBooking__POST(apiRequest, examples.createRequests.depositAsString);
+      expect(response.status).toBe(HTTP_STATUS.OK);
+      examples.invalidBookings.depositAsString.bookingId = response.body.bookingid;
+    });
+    test('RestfulBooker.Booking.Create.POST: Then return 500 status code when firstname is number', req({ bugs: ['BUG-BOOKING-003'] }), async ({ apiRequest }) => {
+      const response = await restfulBooker__createBooking__POST(apiRequest, examples.createRequests.firstnameAsNumber);
+      expect(response.status).toBe(HTTP_STATUS.INTERNAL_SERVER_ERROR);
+      expect(response.body).toBe(ERROR_MESSAGE.INTERNAL_SERVER_ERROR);
+    });
+    test('RestfulBooker.Booking.Create.POST: Then return 500 status code when lastname is boolean', req({ bugs: ['BUG-BOOKING-003'] }), async ({ apiRequest }) => {
+      const response = await restfulBooker__createBooking__POST(apiRequest, examples.createRequests.lastnameAsBoolean);
+      expect(response.status).toBe(HTTP_STATUS.INTERNAL_SERVER_ERROR);
+      expect(response.body).toBe(ERROR_MESSAGE.INTERNAL_SERVER_ERROR);
+    });
+  });
+
+  test.describe('RestfulBooker.Booking.Create.POST: When negative price is provided', () => {
+    test.skip('RestfulBooker.Booking.Create.POST: Then return 500 status code due to missing validation', req({ bugs: ['BUG-BOOKING-004'] }), async ({ apiRequest }) => {
+      const response = await restfulBooker__createBooking__POST(apiRequest, examples.createRequests.negativePrice);
+      expect(response.status).toBe(HTTP_STATUS.INTERNAL_SERVER_ERROR);
+      expect(response.body).toBe(ERROR_MESSAGE.INTERNAL_SERVER_ERROR);
+    });
+  });
+
+  test.describe('RestfulBooker.Booking.Create.POST: When zero price is provided', () => {
+    test('RestfulBooker.Booking.Create.POST: Then return 200 status code as valid for promotional bookings', async ({ apiRequest }) => {
+      const response = await restfulBooker__createBooking__POST(apiRequest, examples.createRequests.zeroPrice);
+      expect(response.status).toBe(HTTP_STATUS.OK);
+      expect(response.body.booking.totalprice).toBe(PRICE.ZERO);
+      examples.validBookings.zeroPrice.bookingId = response.body.bookingid;
+    });
+  });
+
+  test.describe('RestfulBooker.Booking.Create.POST: When invalid date format is provided', () => {
+    test('RestfulBooker.Booking.Create.POST: Then return 200 status code and invalid date format is accepted', req({ bugs: ['BUG-BOOKING-009'] }), async ({ apiRequest }) => {
+      const response = await restfulBooker__createBooking__POST(apiRequest, examples.createRequests.invalidDateFormat);
+      expect(response.status).toBe(HTTP_STATUS.OK);
+      examples.invalidBookings.invalidDateFormat.bookingId = response.body.bookingid;
+    });
+  });
+
+  test.describe('RestfulBooker.Booking.Create.POST: When checkout date is before checkin date', () => {
+    test('RestfulBooker.Booking.Create.POST: Then return 200 status code due to missing date logic validation', req({ bugs: ['BUG-BOOKING-005'] }), async ({ apiRequest }) => {
+      const response = await restfulBooker__createBooking__POST(apiRequest, examples.createRequests.checkoutBeforeCheckin);
+      expect(response.status).toBe(HTTP_STATUS.OK);
+      expect(response.body.booking.bookingdates.checkin).toBe(examples.invalidBookings.checkoutBeforeCheckin.bookingDates.checkin);
+      expect(response.body.booking.bookingdates.checkout).toBe(examples.invalidBookings.checkoutBeforeCheckin.bookingDates.checkout);
+      examples.invalidBookings.checkoutBeforeCheckin.bookingId = response.body.bookingid;
+    });
+  });
+
+  test.describe('RestfulBooker.Booking.Create.POST: When empty string value is provided for required field', () => {
+    test('RestfulBooker.Booking.Create.POST: Then return 200 status code and booking is created with empty field', req({ bugs: ['BUG-BOOKING-006'] }), async ({ apiRequest }) => {
+      const response = await restfulBooker__createBooking__POST(apiRequest, examples.createRequests.emptyStringField);
+      expect(response.status).toBe(HTTP_STATUS.OK);
+      examples.invalidBookings.emptyStringField.data.bookingId = response.body.bookingid;
+      expect(examples.invalidBookings.emptyStringField.expectedValues).toContain(response.body.booking[examples.invalidBookings.emptyStringField.apiFieldName]);
+    });
+  });
+
+  test.describe('RestfulBooker.Booking.Retrieve.GET: When all booking IDs are requested', () => {
+    test('RestfulBooker.Booking.Retrieve.GET: Then return 200 status code and array of booking IDs', async ({ apiRequest }) => {
+      const response = await restfulBooker__getBookingIds__GET(apiRequest, examples.listRequests.all);
+      expect(response.status).toBe(HTTP_STATUS.OK);
+      expect(Array.isArray(response.body)).toBe(true);
+      expect(response.body.length).toBeGreaterThan(0);
+      const bookingIds = response.body.map((b) => b.bookingid);
+      expect(bookingIds).toContain(examples.validBookings.withAllFields.bookingId);
+    });
+  });
+
+  test.describe('RestfulBooker.Booking.Retrieve.GET: When booking IDs filtered by firstname are requested', () => {
+    test('RestfulBooker.Booking.Retrieve.GET: Then return 200 status code and results filtered by firstname include created booking', async ({ apiRequest }) => {
+      const response = await restfulBooker__getBookingIds__GET(apiRequest, examples.listRequests.byFirstname);
+      expect(response.status).toBe(HTTP_STATUS.OK);
+      const bookingIds = response.body.map((b) => b.bookingid);
+      expect(bookingIds).toContain(examples.validBookings.withAllFields.bookingId);
+    });
+  });
+
+  test.describe('RestfulBooker.Booking.Retrieve.GET: When booking IDs filtered by lastname are requested', () => {
+    test('RestfulBooker.Booking.Retrieve.GET: Then return 200 status code and results filtered by lastname include created booking', async ({ apiRequest }) => {
+      const response = await restfulBooker__getBookingIds__GET(apiRequest, examples.listRequests.byLastname);
+      expect(response.status).toBe(HTTP_STATUS.OK);
+      const bookingIds = response.body.map((b) => b.bookingid);
+      expect(bookingIds).toContain(examples.validBookings.withAllFields.bookingId);
+    });
+  });
+
+  test.describe('RestfulBooker.Booking.Retrieve.GET: When booking IDs filtered by full name are requested', () => {
+    test('RestfulBooker.Booking.Retrieve.GET: Then return 200 status code and results filtered by full name include created booking', async ({ apiRequest }) => {
+      const response = await restfulBooker__getBookingIds__GET(apiRequest, examples.listRequests.byFullName);
+      expect(response.status).toBe(HTTP_STATUS.OK);
+      const bookingIds = response.body.map((b) => b.bookingid);
+      expect(bookingIds).toContain(examples.validBookings.withAllFields.bookingId);
+    });
+  });
+
+  test.describe('RestfulBooker.Booking.Retrieve.GET: When booking IDs filtered by dates are requested', () => {
+    test('RestfulBooker.Booking.Retrieve.GET: Then return 200 status code and array response', req({ note: 'Date filtering on this API is unreliable; only response shape is asserted.' }), async ({ apiRequest }) => {
+      const response = await restfulBooker__getBookingIds__GET(apiRequest, examples.listRequests.byDateRange);
+      expect(response.status).toBe(HTTP_STATUS.OK);
+      expect(Array.isArray(response.body)).toBe(true);
+    });
+  });
+
+  test.describe('RestfulBooker.Booking.Retrieve.GET: When booking IDs filtered by non-existing name are requested', () => {
+    test('RestfulBooker.Booking.Retrieve.GET: Then return 200 status code and empty array', async ({ apiRequest }) => {
+      const response = await restfulBooker__getBookingIds__GET(apiRequest, examples.listRequests.byNonExistingName);
+      expect(response.status).toBe(HTTP_STATUS.OK);
+      expect(Array.isArray(response.body)).toBe(true);
+      expect(response.body).toHaveLength(0);
+    });
+  });
+
+  test.describe('RestfulBooker.Booking.Retrieve.GET: When existing booking ID is requested', () => {
+    test('RestfulBooker.Booking.Retrieve.GET: Then return 200 status code and complete booking details', async ({ apiRequest }) => {
+      const response = await restfulBooker__getBookingById__GET(apiRequest, examples.retrieveRequests.withAllFields);
+      expect(response.status).toBe(HTTP_STATUS.OK);
+      expect(response.body.firstname).toBe(examples.validBookings.withAllFields.firstname);
+      expect(response.body.lastname).toBe(examples.validBookings.withAllFields.lastname);
+      expect(response.body.totalprice).toBe(examples.validBookings.withAllFields.totalPrice);
+      expect(response.body.depositpaid).toBe(examples.validBookings.withAllFields.depositPaid);
+      expect(response.body.bookingdates.checkin).toBe(examples.validBookings.withAllFields.bookingDates.checkin);
+      expect(response.body.bookingdates.checkout).toBe(examples.validBookings.withAllFields.bookingDates.checkout);
+    });
+  });
+
+  test.describe('RestfulBooker.Booking.Retrieve.GET: When non-existing booking ID is requested', () => {
+    test('RestfulBooker.Booking.Retrieve.GET: Then return 404 status code and Not Found message', async ({ apiRequest }) => {
+      const response = await restfulBooker__getBookingById__GET(apiRequest, examples.retrieveRequests.nonExistingId);
+      expect(response.status).toBe(HTTP_STATUS.NOT_FOUND);
+      expect(response.body).toBe(ERROR_MESSAGE.NOT_FOUND);
+    });
+  });
+
+  test.describe('RestfulBooker.Booking.Retrieve.GET: When invalid booking ID is requested', () => {
+    test('RestfulBooker.Booking.Retrieve.GET: Then return 404 status code for string ID', req({ bugs: ['BUG-BOOKING-011'] }), async ({ apiRequest }) => {
+      const response = await restfulBooker__getBookingById__GET(apiRequest, examples.retrieveRequests.stringId);
+      expect(response.status).toBe(HTTP_STATUS.NOT_FOUND);
+      expect(response.body).toBe(ERROR_MESSAGE.NOT_FOUND);
+    });
+    test('RestfulBooker.Booking.Retrieve.GET: Then return 404 status code for negative ID', req({ bugs: ['BUG-BOOKING-011'] }), async ({ apiRequest }) => {
+      const response = await restfulBooker__getBookingById__GET(apiRequest, examples.retrieveRequests.negativeId);
+      expect(response.status).toBe(HTTP_STATUS.NOT_FOUND);
+      expect(response.body).toBe(ERROR_MESSAGE.NOT_FOUND);
+    });
+    test('RestfulBooker.Booking.Retrieve.GET: Then return 404 status code for zero ID', req({ bugs: ['BUG-BOOKING-011'] }), async ({ apiRequest }) => {
+      const response = await restfulBooker__getBookingById__GET(apiRequest, examples.retrieveRequests.zeroId);
+      expect(response.status).toBe(HTTP_STATUS.NOT_FOUND);
+      expect(response.body).toBe(ERROR_MESSAGE.NOT_FOUND);
+    });
+    test('RestfulBooker.Booking.Retrieve.GET: Then return 200 or 404 status code for float ID due to truncation', req({ bugs: ['BUG-BOOKING-011'] }), async ({ apiRequest }) => {
+      const response = await restfulBooker__getBookingById__GET(apiRequest, examples.retrieveRequests.floatId);
+      expect([HTTP_STATUS.OK, HTTP_STATUS.NOT_FOUND]).toContain(response.status);
+    });
+    test('RestfulBooker.Booking.Retrieve.GET: Then return 404 status code for special character ID', req({ bugs: ['BUG-BOOKING-011'] }), async ({ apiRequest }) => {
+      const response = await restfulBooker__getBookingById__GET(apiRequest, examples.retrieveRequests.specialId);
+      expect(response.status).toBe(HTTP_STATUS.NOT_FOUND);
+      expect(response.body).toBe(ERROR_MESSAGE.NOT_FOUND);
+    });
+  });
+
+  test.describe('RestfulBooker.Booking.Update.PUT: When valid full update is provided with authentication', () => {
+    test('RestfulBooker.Booking.Update.PUT: Then return 200 status code and all fields are updated', async ({ apiRequest }) => {
+      const response = await restfulBooker__updateBooking__PUT(apiRequest, examples.updateRequests.full);
+      expect(response.status).toBe(HTTP_STATUS.OK);
+      expect(response.body.firstname).toBe(examples.updates.full.firstname);
+      expect(response.body.lastname).toBe(examples.updates.full.lastname);
+      expect(response.body.totalprice).toBe(examples.updates.full.totalPrice);
+      expect(response.body.depositpaid).toBe(examples.updates.full.depositPaid);
+      expect(response.body.bookingdates.checkin).toBe(examples.updates.full.bookingDates.checkin);
+      expect(response.body.bookingdates.checkout).toBe(examples.updates.full.bookingDates.checkout);
+      expect(response.body.additionalneeds).toBe(examples.updates.full.additionalNeeds);
+    });
+  });
+
+  test.describe('RestfulBooker.Booking.Update.PUT: When update is attempted without authentication', () => {
+    test('RestfulBooker.Booking.Update.PUT: Then return 403 status code and Forbidden message', async ({ apiRequest }) => {
+      const response = await restfulBooker__updateBooking__PUT(apiRequest, examples.updateRequests.withoutAuthentication);
+      expect(response.status).toBe(HTTP_STATUS.FORBIDDEN);
+      expect(response.body).toBe(ERROR_MESSAGE.FORBIDDEN);
+    });
+  });
+
+  test.describe('RestfulBooker.Booking.Update.PUT: When update for non-existing booking ID is attempted', () => {
+    test('RestfulBooker.Booking.Update.PUT: Then return 405 status code and Method Not Allowed message', req({ bugs: ['BUG-BOOKING-007'] }), async ({ apiRequest }) => {
+      const response = await restfulBooker__updateBooking__PUT(apiRequest, examples.updateRequests.nonExistingId);
+      expect(response.status).toBe(HTTP_STATUS.METHOD_NOT_ALLOWED);
+      expect(response.body).toBe(ERROR_MESSAGE.METHOD_NOT_ALLOWED);
+    });
+  });
+
+  test.describe('RestfulBooker.Booking.PartialUpdate.PATCH: When single field is partially updated', () => {
+    test('RestfulBooker.Booking.PartialUpdate.PATCH: Then only specified field changes and others remain unchanged', async ({ apiRequest }) => {
+      const response = await restfulBooker__partialUpdateBooking__PATCH(apiRequest, examples.partialUpdateRequests.singleField);
+      expect(response.status).toBe(HTTP_STATUS.OK);
+      expect(response.body[examples.updates.partialField.apiFieldName]).toBe(examples.updates.partialField.value);
+      examples.validBookings.minimalPrice[examples.updates.partialField.name] = examples.updates.partialField.value;
+    });
+  });
+
+  test.describe('RestfulBooker.Booking.PartialUpdate.PATCH: When only checkin date is updated', () => {
+    test(
+      'RestfulBooker.Booking.PartialUpdate.PATCH: Then checkin changes and checkout is preserved using workaround',
+      req({ bugs: ['BUG-BOOKING-010'], note: 'Workaround: send both dates in PATCH to avoid checkout corruption.' }),
+      async ({ apiRequest }) => {
+        const response = await restfulBooker__partialUpdateBooking__PATCH(apiRequest, examples.partialUpdateRequests.checkinOnly);
+        expect(response.status).toBe(HTTP_STATUS.OK);
+        expect(response.body.bookingdates.checkin).toBe(examples.updates.partialCheckinOnly.bookingDates.checkin);
+        expect(response.body.bookingdates.checkout).toBe(examples.updates.partialCheckinOnly.bookingDates.checkout);
+      },
+    );
+  });
+
+  test.describe('RestfulBooker.Booking.PartialUpdate.PATCH: When only checkout date is updated', () => {
+    test(
+      'RestfulBooker.Booking.PartialUpdate.PATCH: Then checkout changes and checkin is preserved using workaround',
+      req({ bugs: ['BUG-BOOKING-010'], note: 'Workaround: send both dates in PATCH to avoid checkin corruption.' }),
+      async ({ apiRequest }) => {
+        const response = await restfulBooker__partialUpdateBooking__PATCH(apiRequest, examples.partialUpdateRequests.checkoutOnly);
+        expect(response.status).toBe(HTTP_STATUS.OK);
+        expect(response.body.bookingdates.checkout).toBe(examples.updates.partialCheckoutOnly.bookingDates.checkout);
+        expect(response.body.bookingdates.checkin).toBe(examples.updates.partialCheckoutOnly.bookingDates.checkin);
+      },
+    );
+  });
+
+  test.describe('RestfulBooker.Booking.PartialUpdate.PATCH: When multiple fields are partially updated', () => {
+    test('RestfulBooker.Booking.PartialUpdate.PATCH: Then all specified fields change and others remain unchanged', async ({ apiRequest }) => {
+      const response = await restfulBooker__partialUpdateBooking__PATCH(apiRequest, examples.partialUpdateRequests.multipleFields);
+      expect(response.status).toBe(HTTP_STATUS.OK);
+      expect(response.body.firstname).toBe(examples.updates.partialMultipleFields.firstname);
+      expect(response.body.totalprice).toBe(examples.updates.partialMultipleFields.totalPrice);
+      expect(response.body.depositpaid).toBe(examples.updates.partialMultipleFields.depositPaid);
+      expect(response.body.additionalneeds).toBe(examples.updates.partialMultipleFields.additionalNeeds);
+      expect(response.body.lastname).toBe(examples.validBookings.longStay.lastname);
+    });
+  });
+
+  test.describe('RestfulBooker.Booking.PartialUpdate.PATCH: When partial update is attempted without authentication', () => {
+    test('RestfulBooker.Booking.PartialUpdate.PATCH: Then return 403 status code and Forbidden message', async ({ apiRequest }) => {
+      const response = await restfulBooker__partialUpdateBooking__PATCH(apiRequest, examples.partialUpdateRequests.withoutAuthentication);
+      expect(response.status).toBe(HTTP_STATUS.FORBIDDEN);
+      expect(response.body).toBe(ERROR_MESSAGE.FORBIDDEN);
+    });
+  });
+
+  test.describe('RestfulBooker.Booking.PartialUpdate.PATCH: When partial update for non-existing ID is attempted', () => {
+    test('RestfulBooker.Booking.PartialUpdate.PATCH: Then return 405 status code and Method Not Allowed message', req({ bugs: ['BUG-BOOKING-007'] }), async ({ apiRequest }) => {
+      const response = await restfulBooker__partialUpdateBooking__PATCH(apiRequest, examples.partialUpdateRequests.nonExistingId);
+      expect(response.status).toBe(HTTP_STATUS.METHOD_NOT_ALLOWED);
+      expect(response.body).toBe(ERROR_MESSAGE.METHOD_NOT_ALLOWED);
+    });
+  });
+
+  test.describe('RestfulBooker.Booking.Delete.DELETE: When valid booking ID is deleted with authentication', () => {
+    test('RestfulBooker.Booking.Delete.DELETE: Then return 201 status code', req({ bugs: ['BUG-BOOKING-008'] }), async ({ apiRequest }) => {
+      const response = await restfulBooker__deleteBooking__DELETE(apiRequest, examples.deleteRequests.sameDayCheckout);
+      expect(response.status).toBe(HTTP_STATUS.CREATED);
+    });
+    test('RestfulBooker.Booking.Delete.DELETE: Then deleted booking returns 404 on retrieval', async ({ apiRequest }) => {
+      const response = await restfulBooker__getBookingById__GET(apiRequest, examples.retrieveRequests.sameDayCheckout);
+      expect(response.status).toBe(HTTP_STATUS.NOT_FOUND);
+      expect(response.body).toBe(ERROR_MESSAGE.NOT_FOUND);
+    });
+  });
+
+  test.describe('RestfulBooker.Booking.Delete.DELETE: When delete is attempted without authentication', () => {
+    test('RestfulBooker.Booking.Delete.DELETE: Then return 403 status code and Forbidden message', async ({ apiRequest }) => {
+      const response = await restfulBooker__deleteBooking__DELETE(apiRequest, examples.deleteRequests.withoutAuthentication);
+      expect(response.status).toBe(HTTP_STATUS.FORBIDDEN);
+      expect(response.body).toBe(ERROR_MESSAGE.FORBIDDEN);
+    });
+  });
+
+  test.describe('RestfulBooker.Booking.Delete.DELETE: When non-existing booking ID is provided', () => {
+    test('RestfulBooker.Booking.Delete.DELETE: Then return 405 status code and Method Not Allowed message', req({ bugs: ['BUG-BOOKING-007'] }), async ({ apiRequest }) => {
+      const response = await restfulBooker__deleteBooking__DELETE(apiRequest, examples.deleteRequests.nonExistingId);
+      expect(response.status).toBe(HTTP_STATUS.METHOD_NOT_ALLOWED);
+      expect(response.body).toBe(ERROR_MESSAGE.METHOD_NOT_ALLOWED);
+    });
+  });
+});

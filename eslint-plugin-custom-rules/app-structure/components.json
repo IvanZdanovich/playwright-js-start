@@ -1,0 +1,24 @@
+{
+  "LoginPage": {
+    "STANDARD": {},
+    "LOCKED": {}
+  },
+  "CartPage": {
+    "STANDARD": {},
+    "Footer": {
+      "STANDARD": {}
+    }
+  },
+  "InventoryPage": {
+    "STANDARD": {},
+    "Card": {
+      "STANDARD": {}
+    },
+    "Footer": {
+      "STANDARD": {}
+    },
+    "Header": {
+      "STANDARD": {}
+    }
+  }
+}

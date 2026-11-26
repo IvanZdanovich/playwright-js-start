@@ -1,0 +1,21 @@
+node_modules
+.git
+.github
+.idea
+.vscode
+.DS_Store
+.env
+npm-debug.log
+*.log
+
+# generated output
+reports/**
+test-results/**
+
+# credentials are mounted at run time, never baked into the image
+playwright/sensitive-data/**
+
+# not needed to run tests
+docs
+.claude
+Dockerfile*

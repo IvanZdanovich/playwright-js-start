@@ -1,0 +1,203 @@
+name: Playwright Tests
+
+on:
+  push:
+    branches: [main, 'feature/**']
+  pull_request:
+  schedule:
+    # Runs every Sunday at 2 AM UTC
+    - cron: '0 2 * * 0'
+  workflow_dispatch:
+    inputs:
+      target_env:
+        description: 'Target environment'
+        default: 'dev'
+        type: choice
+        options: [dev, qa]
+      language:
+        description: 'Language for localization testing'
+        default: 'en'
+        type: choice
+        options: [en]
+      colour_theme:
+        description: 'Colour theme'
+        default: 'default'
+        type: choice
+        options: [default]
+      browser:
+        description: 'Browser'
+        default: 'chromium'
+        type: choice
+        options: [chromium, chrome, edge, firefox, webkit]
+      test_scope:
+        description: 'Playwright project(s) to run'
+        default: 'all'
+        type: choice
+        options: [all, integration-api, integration-ui, e2e-ui]
+      generate_coverage_report:
+        description: 'Generate coverage report'
+        default: false
+        type: boolean
+      generate_flaky_report:
+        description: 'Generate flaky tests report'
+        default: false
+        type: boolean
+      flaky_report_env:
+        description: 'Environment scope for the flaky tests report'
+        default: 'dev'
+        type: choice
+        options: [dev, qa, all]
+      generate_signoff_report:
+        description: 'Generate the HTML sign-off report after tests'
+        default: false
+        type: boolean
+      run_tests:
+        description: 'Run Playwright tests'
+        default: true
+        type: boolean
+
+# The results-collection step pushes the test-run ledger to the orphan `test-results` branch.
+permissions:
+  contents: write
+
+env:
+  TARGET_ENV: ${{ inputs.target_env || 'dev' }}
+  LANGUAGE: ${{ inputs.language || 'en' }}
+  COLOUR_THEME: ${{ inputs.colour_theme || 'default' }}
+  BROWSER: ${{ inputs.browser || 'chromium' }}
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: 'npm'
+      - run: npm ci
+      - run: npx prettier --check .
+      - run: npx eslint . --max-warnings 0
+      - run: npm run test:rules
+      - run: npm run validate
+
+  tests:
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.run_tests != false }}
+    runs-on: ubuntu-latest
+    # Same image as the Dockerfile; its tag must equal the @playwright/test version.
+    container: mcr.microsoft.com/playwright:v1.65.1-noble
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
+    env:
+      CI: 'true'
+      HOME: /root
+    steps:
+      - uses: actions/checkout@v7
+      - run: npm ci
+      - name: Create sensitive data from secrets
+        run: |
+          mkdir -p playwright/sensitive-data
+          echo '${{ secrets.DEV_USERS_JSON }}' > "playwright/sensitive-data/${TARGET_ENV}-users.json"
+      - name: Run Playwright tests
+        run: |
+          PROJECTS=""
+          if [ "${{ inputs.test_scope || 'all' }}" != "all" ]; then PROJECTS="--project=${{ inputs.test_scope }}"; fi
+          npx playwright test $PROJECTS --shard=${{ matrix.shard }}/${{ strategy.job-total }} --reporter=blob
+      - name: Clean up sensitive files
+        if: always()
+        run: rm -rf playwright/sensitive-data
+      - name: Upload blob report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: blob-report-${{ matrix.shard }}
+          path: blob-report
+          retention-days: 1
+
+  merge-reports:
+    if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || inputs.run_tests != false) }}
+    needs: tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: 'npm'
+      - run: npm ci
+      - uses: actions/download-artifact@v7
+        with:
+          path: all-blob-reports
+          pattern: blob-report-*
+          merge-multiple: true
+      - name: Merge shard reports into HTML and JSON
+        run: |
+          PLAYWRIGHT_HTML_OUTPUT_DIR=reports/html PLAYWRIGHT_JSON_OUTPUT_FILE=reports/results.json \
+            npx playwright merge-reports --reporter=html,json ./all-blob-reports
+      - name: Register flaky tests
+        env:
+          CI: 'true'
+          RESULTS_RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}
+          GIT_AUTHOR_NAME: 'github-actions[bot]'
+          GIT_AUTHOR_EMAIL: '41898282+github-actions[bot]@users.noreply.github.com'
+          GIT_COMMITTER_NAME: 'github-actions[bot]'
+          GIT_COMMITTER_EMAIL: '41898282+github-actions[bot]@users.noreply.github.com'
+        run: node scripts/collect-test-results.js --reports reports/results.json
+      - name: Build sign-off report
+        if: ${{ inputs.generate_signoff_report == true }}
+        run: npm run report:signoff -- --reports reports/results.json --output-dir reports
+      - name: Upload Playwright report
+        uses: actions/upload-artifact@v7
+        with:
+          name: playwright-report-${{ github.run_number }}
+          path: reports/
+          retention-days: 30
+      - name: Upload sign-off report
+        if: ${{ inputs.generate_signoff_report == true }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: signoff-report-${{ github.run_number }}-${{ github.run_attempt }}
+          path: reports/signoff-report.html
+          if-no-files-found: warn
+          retention-days: 30
+
+  generate-coverage-report:
+    # Coverage is derived from spec titles and app-structure, not from run results.
+    if: ${{ inputs.generate_coverage_report == true }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: 'npm'
+      - run: npm ci
+      - run: npm run report:coverage
+      - uses: actions/upload-artifact@v7
+        with:
+          name: coverage-report-${{ github.run_number }}
+          path: reports/coverage-gaps.md
+          retention-days: 30
+
+  generate-flaky-report:
+    needs: merge-reports
+    if: ${{ !cancelled() && inputs.generate_flaky_report == true }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: 'npm'
+      - run: npm ci
+      - name: Generate flaky tests report
+        env:
+          FLAKY_ENV: ${{ inputs.flaky_report_env || 'dev' }}
+        run: npm run report:flaky:"$FLAKY_ENV"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: flaky-report-${{ github.run_number }}
+          path: reports/flaky-tests-${{ inputs.flaky_report_env || 'dev' }}.md
+          retention-days: 30

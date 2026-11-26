@@ -1,0 +1,33 @@
+/**
+ * @module RestfulBooker.Booking — Constraints
+ * @description Single source of truth for boundary values and domain constants
+ *   used by both spec files and examples files.
+ *
+ *   Import in specs and test data:
+ *     import { PRICE, LONG_STAY_MIN_DAYS, DATE_FORMAT, REQUIRED_FIELDS, BAD_CREDENTIALS_REASON } from '../../constants/api/rb.booking.api.constraints';
+ *
+ *   For HTTP status codes and error messages, import directly from common:
+ *     import { HTTP_STATUS, ERROR_MESSAGE } from '../../constants/api/common.api.constraints';
+ */
+
+/** Price constraints for totalprice validation. */
+export const PRICE = Object.freeze({
+  MIN: 1,
+  MAX: 100_000,
+  ZERO: 0,
+});
+
+/** Minimum contiguous stay length (days) for the "long stay" edge case. */
+export const LONG_STAY_MIN_DAYS = 90;
+
+/** Expected date format for checkin/checkout fields. */
+export const DATE_FORMAT = 'YYYY-MM-DD';
+
+/**
+ * Fields required for a valid booking payload.
+ * Used by missing-field, invalid-type, and empty-string tests.
+ */
+export const REQUIRED_FIELDS = Object.freeze(['firstname', 'lastname', 'totalPrice', 'depositPaid', 'bookingDates.checkin', 'bookingDates.checkout']);
+
+/** Reason returned by the auth endpoint when the username or password is wrong. */
+export const BAD_CREDENTIALS_REASON = 'Bad credentials';

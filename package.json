@@ -1,0 +1,82 @@
+{
+  "name": "playwright-js-start",
+  "version": "1.0.0",
+  "description": "Playwright testing framework starter built on the Constraints → Examples → Specs approach, with a create-playwright-start CLI",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/IvanZdanovich/playwright-js-start.git"
+  },
+  "bin": {
+    "create-playwright-start": "bin/playwright-start.js"
+  },
+  "files": [
+    "bin/playwright-start.js"
+  ],
+  "private": false,
+  "scripts": {
+    "test": "playwright test",
+    "test:parallel": "cross-env-shell playwright test --workers=${PARALLEL_STREAMS:-3}",
+    "test:api": "playwright test --project=integration-api",
+    "test:ui": "playwright test --project=integration-ui --project=e2e-ui",
+    "test:rules": "node --test eslint-plugin-custom-rules/__tests__",
+    "debug": "playwright test --ui",
+    "l10n": "node scripts/l10n.js",
+    "l10n:gen-types": "node scripts/l10n.js types",
+    "l10n:add": "node scripts/l10n.js add",
+    "l10n:remove": "node scripts/l10n.js remove",
+    "l10n:rename": "node scripts/l10n.js rename",
+    "l10n:list": "node scripts/l10n.js list",
+    "l10n:validate": "node scripts/l10n.js validate",
+    "colours": "node scripts/colours.js",
+    "colours:gen-types": "node scripts/colours.js types",
+    "colours:add": "node scripts/colours.js add",
+    "colours:remove": "node scripts/colours.js remove",
+    "colours:rename": "node scripts/colours.js rename",
+    "colours:list": "node scripts/colours.js list",
+    "colours:validate": "node scripts/colours.js validate",
+    "sync:colours": "node scripts/colours.js sync",
+    "sync:l10n": "node scripts/l10n.js sync",
+    "sync": "node scripts/colours.js sync && node scripts/l10n.js sync",
+    "lint": "eslint . --format stylish --fix",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "validate": "node scripts/validate-guidance.js",
+    "hooks:setup": "node scripts/setup-git-hooks.js",
+    "postinstall": "node -e \"const fs=require('fs');if(fs.existsSync('scripts/setup-git-hooks.js')){require('child_process').spawnSync(process.execPath,['scripts/setup-git-hooks.js'],{stdio:'inherit'})}\"",
+    "report:coverage:integration-ui": "node scripts/analyze-coverage-gaps.js --type=integration-ui --format=markdown --output=reports/coverage-integration-ui.md",
+    "report:coverage:integration-api": "node scripts/analyze-coverage-gaps.js --type=integration-api --format=markdown --output=reports/coverage-integration-api.md",
+    "report:coverage:e2e-ui": "node scripts/analyze-coverage-gaps.js --type=e2e-ui --format=markdown --output=reports/coverage-e2e-ui.md",
+    "report:coverage:check": "node scripts/analyze-coverage-gaps.js --type=all --threshold=80",
+    "report:coverage": "node scripts/analyze-coverage-gaps.js --type=all --format=markdown --output=reports/coverage-gaps.md",
+    "report:flaky": "node scripts/analyze-flaky-tests.js --output reports/flaky-tests.md",
+    "report:flaky:all": "node scripts/analyze-flaky-tests.js --output reports/flaky-tests-all.md",
+    "report:flaky:qa": "node scripts/analyze-flaky-tests.js --env qa --output reports/flaky-tests-qa.md",
+    "report:flaky:dev": "node scripts/analyze-flaky-tests.js --env dev --output reports/flaky-tests-dev.md",
+    "report:suppress": "node scripts/manage-flaky-suppressions.js --add",
+    "report:unsuppress": "node scripts/manage-flaky-suppressions.js --remove",
+    "report:suppress-run": "node scripts/manage-flaky-suppressions.js --add-runs",
+    "report:unsuppress-run": "node scripts/manage-flaky-suppressions.js --remove-runs",
+    "report:review": "node scripts/manage-flaky-suppressions.js --review",
+    "report:signoff": "node scripts/generate-signoff-report.js",
+    "test:cli": "node --test bin/__tests__"
+  },
+  "author": "Ivan Zdanovich",
+  "license": "MIT",
+  "engines": {
+    "node": ">=24"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@playwright/test": "1.65.1",
+    "@types/node": "^26.6.11",
+    "cross-env": "^10.1.0",
+    "eslint": "^10.15.0",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-playwright": "^2.12.2",
+    "eslint-plugin-prettier": "^5.5.7",
+    "espree": "^11.2.0",
+    "glob": "^14.0.6",
+    "globals": "^17.14.0",
+    "prettier": "^3.10.1"
+  }
+}

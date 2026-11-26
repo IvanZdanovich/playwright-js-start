@@ -1,0 +1,27 @@
+# generated type unions (regenerate with npm run l10n:gen-types / colours:gen-types)
+playwright/support/l10n-keys.d.ts
+playwright/support/colours-keys.d.ts
+
+# Playwright output and generated reports
+test-results/
+reports/**
+playwright/.auth/
+
+# dependencies
+node_modules
+
+# sensitive data
+playwright/sensitive-data/**
+!playwright/sensitive-data/env-users.example.json
+
+# IDEs and editors
+.idea
+.vscode
+
+# system files
+.DS_Store
+Thumbs.db
+
+# local files
+.env
+blob-report/

@@ -1,0 +1,76 @@
+// Compiled once at module scope — reused across every file and every call.
+const UI_PART_PATTERN = /^[a-z][a-zA-Z0-9]*$/;
+
+module.exports = {
+  meta: {
+    type: 'problem',
+    docs: {
+      description: 'Verify UI command names follow the naming convention: pageName__actionDescription',
+      category: 'Best Practices',
+      recommended: true,
+    },
+    schema: [],
+    messages: {
+      invalidUiCommandName: 'UI command name "{{commandName}}" does not follow the naming convention. Expected pattern: pageName__actionDescription (e.g., "loginPage__logIn", "checkoutPage__fillForm")',
+      missingDoubleUnderscore: 'UI command name "{{commandName}}" must use double underscores (__) as separator',
+      invalidCasing: 'UI command name "{{commandName}}" must use camelCase for page and action parts',
+      tooManyParts: 'UI command name "{{commandName}}" must have exactly two parts: pageName__actionDescription',
+    },
+  },
+  create(context) {
+    const filename = context.filename || context.getFilename?.() || '';
+
+    // Only apply this rule to UI command files
+    if (!filename.includes('/commands/ui/') || !filename.endsWith('.ui.commands.js')) {
+      return {};
+    }
+
+    // Pattern: pageName__actionDescription
+    // - pageName: camelCase
+    // - actionDescription: camelCase
+
+    function validateUiCommandName(commandName) {
+      // Check for double underscores
+      if (!commandName.includes('__')) {
+        return 'missingDoubleUnderscore';
+      }
+
+      // Split by double underscores
+      const parts = commandName.split('__');
+
+      // Must have exactly 2 parts: page, action
+      if (parts.length !== 2) {
+        return 'tooManyParts';
+      }
+
+      const [page, action] = parts;
+
+      // Validate page name (must start with lowercase letter, can contain letters and numbers)
+      if (!UI_PART_PATTERN.test(page)) {
+        return 'invalidCasing';
+      }
+
+      // Validate action name (must start with lowercase letter, can contain letters and numbers)
+      if (!UI_PART_PATTERN.test(action)) {
+        return 'invalidCasing';
+      }
+
+      return null;
+    }
+
+    function check(idNode) {
+      const error = validateUiCommandName(idNode.name);
+      if (error) context.report({ node: idNode, messageId: error, data: { commandName: idNode.name } });
+    }
+
+    return {
+      // Every exported function in a command file is a command; non-exported helpers are private.
+      'ExportNamedDeclaration > FunctionDeclaration'(node) {
+        if (node.id) check(node.id);
+      },
+      'ExportNamedDeclaration > VariableDeclaration > VariableDeclarator'(node) {
+        if (node.id.type === 'Identifier' && node.init && ['ArrowFunctionExpression', 'FunctionExpression'].includes(node.init.type)) check(node.id);
+      },
+    };
+  },
+};
