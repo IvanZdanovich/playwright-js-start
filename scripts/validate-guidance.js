@@ -12,8 +12,8 @@
  *   COMMANDS  — every backticked double-underscore identifier (a command such as loginPage__logIn, or an examples
  *               export) outside fenced examples is exported somewhere under `playwright/`. Fenced code blocks may
  *               show illustrative names.
- *   RULE_GLOBS — every `paths:` glob in `.claude/rules/*.md` frontmatter matches at least one file, so no rule
- *               is scoped to files that do not exist.
+ *   RULE_GLOBS — at least one `paths:` glob of each `.claude/rules/*.md` file matches a file, so no rule is scoped
+ *               only to files that do not exist.
  */
 const fs = require('fs');
 const path = require('path');
@@ -100,9 +100,10 @@ function main() {
       }
     }
     if (file.startsWith('.claude/rules/')) {
-      for (const pattern of frontmatterGlobs(text)) {
-        if (glob(pattern).length === 0 && !CREATED_ON_DEMAND.some((dir) => pattern.startsWith(dir))) report(0, `paths glob '${pattern}' matches no file`);
-      }
+      // A rule may list globs for files that appear later; it is broken only when no glob in its list matches a
+      // file, because then it never loads.
+      const patterns = frontmatterGlobs(text).filter((pattern) => !CREATED_ON_DEMAND.some((dir) => pattern.startsWith(dir)));
+      if (patterns.length > 0 && patterns.every((pattern) => glob(pattern).length === 0)) report(0, `no paths glob matches a file: ${patterns.join(', ')}`);
     }
   }
 
