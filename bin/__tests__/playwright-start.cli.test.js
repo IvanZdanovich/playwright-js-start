@@ -53,6 +53,12 @@ function makeMinimalTemplate(parentDir) {
 
   fs.writeFileSync(path.join(tplPath, 'playwright.config.js'), 'module.exports = {};\n');
   fs.writeFileSync(path.join(tplPath, 'scripts', 'validate-guidance.js'), '// guidance check\n');
+  // CLI tooling that ships in the template repo but must never reach a scaffolded project.
+  fs.mkdirSync(path.join(tplPath, 'bin', '__tests__'), { recursive: true });
+  fs.mkdirSync(path.join(tplPath, '.github', 'workflows'), { recursive: true });
+  fs.writeFileSync(path.join(tplPath, 'bin', 'playwright-start.js'), '// cli\n');
+  fs.writeFileSync(path.join(tplPath, 'bin', '__tests__', 'playwright-start.test.js'), '// cli tests\n');
+  fs.writeFileSync(path.join(tplPath, '.github', 'workflows', 'cli-tests.yml'), 'name: CLI Tests\n');
   fs.writeFileSync(path.join(tplPath, 'playwright', 'sensitive-data', 'env-users.example.json'), '{"user":"example"}\n');
 
   // Build a package.json that contains every script from OPTIONAL_MODULES so
@@ -62,7 +68,9 @@ function makeMinimalTemplate(parentDir) {
   for (const mod of Object.values(OPTIONAL_MODULES)) {
     Object.assign(scripts, mod.scripts ?? {});
   }
-  fs.writeFileSync(path.join(tplPath, 'package.json'), JSON.stringify({ version: '5.0.0', scripts, devDependencies: {} }, null, 2) + '\n');
+  scripts['test:cli'] = 'node --test bin/__tests__';
+  const templatePackage = { name: 'playwright-js-start', version: '5.0.0', bin: { 'create-playwright-start': 'bin/playwright-start.js' }, files: ['bin/playwright-start.js'], private: false, scripts, devDependencies: {} };
+  fs.writeFileSync(path.join(tplPath, 'package.json'), JSON.stringify(templatePackage, null, 2) + '\n');
 
   git(tplPath, ['init']);
   git(tplPath, ['config', 'user.email', 'test@example.com']);
@@ -155,6 +163,13 @@ test('CLI full setup: creates project directory, writes manifest, seeds credenti
     assert.ok(fs.existsSync(path.join(projectPath, 'package.json')), 'package.json must exist');
     assert.ok(fs.existsSync(path.join(projectPath, '.git')), 'fresh .git must be initialised');
     assert.ok(!fs.existsSync(path.join(projectPath, 'bin')), 'bin/ must NOT be copied into the project');
+    assert.ok(!fs.existsSync(path.join(projectPath, '.github', 'workflows', 'cli-tests.yml')), 'the CLI test workflow must NOT be copied');
+    const projectPackage = JSON.parse(fs.readFileSync(path.join(projectPath, 'package.json'), 'utf8'));
+    assert.equal(projectPackage.name, projectName, 'package.json must be renamed to the project');
+    assert.equal(projectPackage.bin, undefined, 'the CLI bin entry must be removed');
+    assert.equal(projectPackage.files, undefined, 'the CLI files list must be removed');
+    assert.equal(projectPackage.scripts['test:cli'], undefined, 'the CLI test script must be removed');
+    assert.equal(projectPackage.private, true, 'a scaffolded project is private');
 
     // Manifest
     const manifest = readManifest(projectPath);

@@ -193,6 +193,7 @@ function isExcludedFromUpdate(relPath) {
   // The bin/ folder is the CLI tooling that ships with the template package
   // itself — it must never be copied into a consumer project.
   if (normalized.startsWith('bin/')) return true;
+  if (normalized === '.github/workflows/cli-tests.yml') return true;
 
   // Preserve user credentials but keep the example file up to date.
   return /^playwright\/sensitive-data\//.test(normalized) && !normalized.endsWith('env-users.example.json');
@@ -677,6 +678,25 @@ async function updateProject(target) {
   }
 }
 
+// The template repository also ships this CLI. A cloned project keeps only the framework: the CLI code, its test
+// workflow, and the npm package fields that publish the CLI are removed, and package.json takes the project's name.
+const CLI_TOOLING_PATHS = ['bin', path.join('.github', 'workflows', 'cli-tests.yml')];
+
+function pruneCliTooling(projectPath, projectName) {
+  for (const relPath of CLI_TOOLING_PATHS) fs.rmSync(path.join(projectPath, relPath), { recursive: true, force: true });
+
+  const packageJsonPath = path.join(projectPath, 'package.json');
+  if (!fs.existsSync(packageJsonPath)) return;
+  const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
+  delete packageJson.bin;
+  delete packageJson.files;
+  delete packageJson.repository;
+  if (packageJson.scripts) delete packageJson.scripts['test:cli'];
+  packageJson.name = path.basename(path.resolve(projectPath)) || projectName;
+  packageJson.private = true;
+  fs.writeFileSync(packageJsonPath, JSON.stringify(packageJson, null, 2) + '\n');
+}
+
 async function cleanupGitHistory(projectName) {
   logStep('2/5', 'Initializing fresh repository...');
 
@@ -1009,6 +1029,7 @@ async function main() {
       } else {
         // Execute full setup steps (5 steps) for a fresh directory
         await cloneTemplate(projectName);
+        pruneCliTooling(path.resolve(projectName), projectName);
         await cleanupGitHistory(projectName);
         await setupSensitiveData(projectName, setupMode, { overwriteExisting: true });
 
@@ -1060,6 +1081,7 @@ if (require.main === module) {
 
 module.exports = {
   OPTIONAL_MODULES,
+  pruneCliTooling,
   MANIFEST_FILE,
   validateProjectName,
   copyDirectory,

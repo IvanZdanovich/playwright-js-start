@@ -21,8 +21,9 @@ const path = require('path');
 const ROOT = path.join(__dirname, '..');
 const TOP_LEVEL = new Set(fs.readdirSync(ROOT).filter((name) => !name.startsWith('.') || name === '.claude' || name === '.github'));
 const PLACEHOLDER = /[<>*{}[\]]|\.\.\./;
-// Locations created on demand (by an authoring skill) or by a run (reports); they may not exist yet.
-const CREATED_ON_DEMAND = ['.claude/agents/', 'reports/', 'test-results/'];
+// Locations created on demand (by an authoring skill), by a run (reports), or by a generator (git-ignored key unions);
+// a fresh checkout does not have them yet.
+const CREATED_ON_DEMAND = ['.claude/agents/', 'reports/', 'test-results/', 'playwright/support/l10n-keys.d.ts', 'playwright/support/colours-keys.d.ts'];
 
 const glob = (pattern) => fs.globSync(pattern, { cwd: ROOT, exclude: (name) => name === 'node_modules' || name === '.git' });
 

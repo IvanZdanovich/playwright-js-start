@@ -266,6 +266,8 @@ test('isExcludedFromUpdate protects user-owned files but allows template files',
   assert.equal(isExcludedFromUpdate('playwright/sensitive-data/qa-users.json'), true);
   // The bin/ folder is CLI tooling — never copy it into a consumer project.
   assert.equal(isExcludedFromUpdate('bin/playwright-start.js'), true);
+  assert.equal(isExcludedFromUpdate('.github/workflows/cli-tests.yml'), true);
+  assert.equal(isExcludedFromUpdate('.github/workflows/playwright-tests.yml'), false);
   assert.equal(isExcludedFromUpdate('bin/__tests__/playwright-start.test.js'), true);
   // The example file should stay in sync with the template.
   assert.equal(isExcludedFromUpdate('playwright/sensitive-data/env-users.example.json'), false);
