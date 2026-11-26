@@ -1,0 +1,667 @@
+'use strict';
+
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const { spawnSync } = require('child_process');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+
+const {
+  OPTIONAL_MODULES,
+  MANIFEST_FILE,
+  validateProjectName,
+  copyDirectory,
+  copySpecificFiles,
+  copyOrUpdatePackageJson,
+  isExcludedFromUpdate,
+  isSeedOnlyFile,
+  buildTemplateFileList,
+  readManifest,
+  writeManifest,
+  computeFilesToDelete,
+  getTemplateVersion,
+  syncTemplateFiles,
+  deleteObsoleteFiles,
+  createSensitiveDataFilesFromExample,
+  runNpmInstall,
+  updateProject,
+  installFullIntoExistingDirectory,
+} = require('../playwright-start.js');
+
+// --- helpers ---------------------------------------------------------------
+
+function makeTmpDir() {
+  return fs.mkdtempSync(path.join(os.tmpdir(), 'playwright-start-test-'));
+}
+
+async function withTmpCwd(run) {
+  const tmp = makeTmpDir();
+  const originalCwd = process.cwd();
+  process.chdir(tmp);
+  try {
+    return await run(tmp);
+  } finally {
+    process.chdir(originalCwd);
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+}
+
+function runGit(cwd, args) {
+  const result = spawnSync('git', args, { cwd, encoding: 'utf8' });
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  return result.stdout.trim();
+}
+
+// --- validateProjectName ---------------------------------------------------
+
+test('validateProjectName rejects an empty name', async () => {
+  assert.equal(await validateProjectName(''), false);
+  assert.equal(await validateProjectName(undefined), false);
+});
+
+test('validateProjectName rejects names with illegal characters', async () => {
+  assert.equal(await validateProjectName('my project'), false); // space
+  assert.equal(await validateProjectName('my/project'), false); // slash
+  assert.equal(await validateProjectName('proj$'), false); // symbol
+});
+
+test('validateProjectName accepts letters, numbers, dots, dashes, underscores', async () => {
+  await withTmpCwd(async () => {
+    assert.equal(await validateProjectName('valid-name_1.0'), true);
+  });
+});
+
+test('validateProjectName rejects a name that already exists as a directory', async () => {
+  await withTmpCwd(async (tmp) => {
+    fs.mkdirSync(path.join(tmp, 'existing'));
+    assert.equal(await validateProjectName('existing'), false);
+  });
+});
+
+test('validateProjectName allows an existing directory when explicitly requested', async () => {
+  await withTmpCwd(async (tmp) => {
+    fs.mkdirSync(path.join(tmp, 'existing'));
+    assert.equal(await validateProjectName('existing', { allowExistingDirectory: true }), true);
+    assert.equal(await validateProjectName('.', { allowExistingDirectory: true }), true);
+  });
+});
+
+test('validateProjectName still rejects an existing file when existing directories are allowed', async () => {
+  await withTmpCwd(async (tmp) => {
+    fs.writeFileSync(path.join(tmp, 'file-target'), 'not a directory');
+    assert.equal(await validateProjectName('file-target', { allowExistingDirectory: true }), false);
+  });
+});
+
+// --- copyDirectory ---------------------------------------------------------
+
+test('copyDirectory recursively copies files and nested folders', async () => {
+  await withTmpCwd((tmp) => {
+    const src = path.join(tmp, 'src');
+    const dest = path.join(tmp, 'dest');
+    fs.mkdirSync(path.join(src, 'nested'), { recursive: true });
+    fs.writeFileSync(path.join(src, 'a.txt'), 'a');
+    fs.writeFileSync(path.join(src, 'nested', 'b.txt'), 'b');
+
+    copyDirectory(src, dest);
+
+    assert.equal(fs.readFileSync(path.join(dest, 'a.txt'), 'utf8'), 'a');
+    assert.equal(fs.readFileSync(path.join(dest, 'nested', 'b.txt'), 'utf8'), 'b');
+  });
+});
+
+// --- copyOrUpdatePackageJson ----------------------------------------------
+
+function writeSourcePackageJson(tempPath) {
+  fs.mkdirSync(tempPath, { recursive: true });
+  fs.writeFileSync(
+    path.join(tempPath, 'package.json'),
+    JSON.stringify({
+      devDependencies: {
+        eslint: '^10.0.0',
+        prettier: '^3.0.0',
+        glob: '^13.0.0',
+        '@eslint/js': '^10.0.0',
+        'eslint-config-prettier': '^10.0.0',
+        'eslint-plugin-playwright': '^6.0.0',
+        'eslint-plugin-prettier': '^5.0.0',
+      },
+    }),
+  );
+}
+
+test('copyOrUpdatePackageJson creates a new package.json with selected module scripts and deps', async () => {
+  await withTmpCwd(async (tmp) => {
+    const projectPath = path.join(tmp, 'project');
+    const tempPath = path.join(tmp, 'temp-clone');
+    fs.mkdirSync(projectPath, { recursive: true });
+    writeSourcePackageJson(tempPath);
+
+    await copyOrUpdatePackageJson(projectPath, { guidanceCheck: true }, tempPath);
+
+    const pkg = JSON.parse(fs.readFileSync(path.join(projectPath, 'package.json'), 'utf8'));
+    assert.equal(pkg.scripts.validate, OPTIONAL_MODULES.guidanceCheck.scripts.validate);
+    // The guidance check needs no package; unselected module deps must not leak in.
+    assert.deepEqual(pkg.devDependencies, {});
+  });
+});
+
+test('copyOrUpdatePackageJson merges into an existing package.json without clobbering it', async () => {
+  await withTmpCwd(async (tmp) => {
+    const projectPath = path.join(tmp, 'project');
+    const tempPath = path.join(tmp, 'temp-clone');
+    fs.mkdirSync(projectPath, { recursive: true });
+    fs.writeFileSync(path.join(projectPath, 'package.json'), JSON.stringify({ name: 'existing-app', scripts: { start: 'node index.js' }, devDependencies: { existing: '^1.0.0' } }));
+    writeSourcePackageJson(tempPath);
+
+    await copyOrUpdatePackageJson(projectPath, { eslintCustomRules: true }, tempPath);
+
+    const pkg = JSON.parse(fs.readFileSync(path.join(projectPath, 'package.json'), 'utf8'));
+    assert.equal(pkg.name, 'existing-app');
+    assert.equal(pkg.scripts.start, 'node index.js');
+    assert.equal(pkg.scripts.lint, OPTIONAL_MODULES.eslintCustomRules.scripts.lint);
+    assert.equal(pkg.devDependencies.existing, '^1.0.0');
+    assert.equal(pkg.devDependencies.eslint, '^10.0.0');
+  });
+});
+
+test('copyOrUpdatePackageJson is a no-op when the source package.json is missing', async () => {
+  await withTmpCwd(async (tmp) => {
+    const projectPath = path.join(tmp, 'project');
+    const tempPath = path.join(tmp, 'temp-clone-missing');
+    fs.mkdirSync(projectPath, { recursive: true });
+
+    await copyOrUpdatePackageJson(projectPath, { guidanceCheck: true }, tempPath);
+
+    assert.equal(fs.existsSync(path.join(projectPath, 'package.json')), false);
+  });
+});
+
+test('copySpecificFiles supports copying selected modules into the current directory', async () => {
+  await withTmpCwd(async (tmp) => {
+    const template = path.join(tmp, 'template-source');
+
+    fs.mkdirSync(path.join(template, 'scripts'), { recursive: true });
+    fs.writeFileSync(path.join(template, 'scripts', 'validate-guidance.js'), 'console.log("guidance");\n');
+    fs.writeFileSync(path.join(template, 'package.json'), JSON.stringify({ version: '7.7.7', devDependencies: { glob: '^13.0.0' } }, null, 2) + '\n');
+    fs.writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({ name: 'existing-app', scripts: { start: 'node app.js' } }, null, 2) + '\n');
+
+    runGit(template, ['init']);
+    runGit(template, ['config', 'user.email', 'test@example.com']);
+    runGit(template, ['config', 'user.name', 'Test User']);
+    runGit(template, ['add', '-A']);
+    runGit(template, ['commit', '-m', 'template']);
+
+    const previousTemplateUrl = process.env.PLAYWRIGHT_START_TEMPLATE_URL;
+    process.env.PLAYWRIGHT_START_TEMPLATE_URL = template;
+    try {
+      await copySpecificFiles('.', { guidanceCheck: true });
+    } finally {
+      if (previousTemplateUrl === undefined) {
+        delete process.env.PLAYWRIGHT_START_TEMPLATE_URL;
+      } else {
+        process.env.PLAYWRIGHT_START_TEMPLATE_URL = previousTemplateUrl;
+      }
+    }
+
+    assert.equal(fs.readFileSync(path.join(tmp, 'scripts', 'validate-guidance.js'), 'utf8'), 'console.log("guidance");\n');
+
+    const pkg = JSON.parse(fs.readFileSync(path.join(tmp, 'package.json'), 'utf8'));
+    assert.equal(pkg.name, 'existing-app');
+    assert.equal(pkg.scripts.start, 'node app.js');
+    assert.equal(pkg.scripts.validate, OPTIONAL_MODULES.guidanceCheck.scripts.validate);
+    assert.equal(pkg.devDependencies?.glob, undefined);
+
+    const manifest = readManifest(tmp);
+    assert.equal(manifest.version, '7.7.7');
+    assert.deepEqual(manifest.files, ['scripts/validate-guidance.js']);
+  });
+});
+
+test('copySpecificFiles does not overwrite an existing seed-only file in the target directory', async () => {
+  await withTmpCwd(async (tmp) => {
+    const template = path.join(tmp, 'template-source');
+
+    fs.mkdirSync(path.join(template, 'scripts'), { recursive: true });
+    // thresholds.json is a seed-only file
+    fs.writeFileSync(path.join(template, 'scripts', 'thresholds.json'), '{"template":true}\n');
+    fs.writeFileSync(path.join(template, 'package.json'), JSON.stringify({ version: '1.0.0', devDependencies: {} }, null, 2) + '\n');
+
+    runGit(template, ['init']);
+    runGit(template, ['config', 'user.email', 'test@example.com']);
+    runGit(template, ['config', 'user.name', 'Test User']);
+    runGit(template, ['add', '-A']);
+    runGit(template, ['commit', '-m', 'template']);
+
+    // Pre-seed the project with its own thresholds.json
+    fs.mkdirSync(path.join(tmp, 'scripts'), { recursive: true });
+    fs.writeFileSync(path.join(tmp, 'scripts', 'thresholds.json'), '{"project":true}\n');
+
+    const previousTemplateUrl = process.env.PLAYWRIGHT_START_TEMPLATE_URL;
+    process.env.PLAYWRIGHT_START_TEMPLATE_URL = template;
+    try {
+      await copySpecificFiles('.', { eslintCustomRules: true });
+    } finally {
+      if (previousTemplateUrl === undefined) {
+        delete process.env.PLAYWRIGHT_START_TEMPLATE_URL;
+      } else {
+        process.env.PLAYWRIGHT_START_TEMPLATE_URL = previousTemplateUrl;
+      }
+    }
+
+    // The project's thresholds.json must not have been overwritten
+    assert.equal(fs.readFileSync(path.join(tmp, 'scripts', 'thresholds.json'), 'utf8'), '{"project":true}\n');
+  });
+});
+
+// --- update helpers --------------------------------------------------------
+
+test('isExcludedFromUpdate protects user-owned files but allows template files', () => {
+  assert.equal(isExcludedFromUpdate('package.json'), true);
+  assert.equal(isExcludedFromUpdate('package-lock.json'), true);
+  assert.equal(isExcludedFromUpdate('.git/config'), true);
+  assert.equal(isExcludedFromUpdate('node_modules/foo/index.js'), true);
+  assert.equal(isExcludedFromUpdate('playwright/sensitive-data/dev-users.json'), true);
+  assert.equal(isExcludedFromUpdate('playwright/sensitive-data/qa-users.json'), true);
+  // The bin/ folder is CLI tooling — never copy it into a consumer project.
+  assert.equal(isExcludedFromUpdate('bin/playwright-start.js'), true);
+  assert.equal(isExcludedFromUpdate('bin/__tests__/playwright-start.test.js'), true);
+  // The example file should stay in sync with the template.
+  assert.equal(isExcludedFromUpdate('playwright/sensitive-data/env-users.example.json'), false);
+  assert.equal(isExcludedFromUpdate('playwright/e2e/ui/login.spec.js'), false);
+});
+
+test('MANIFEST_FILE constant equals the expected filename', () => {
+  assert.equal(MANIFEST_FILE, '.playwright-start-manifest.json');
+});
+
+test('isSeedOnlyFile identifies the three project-owned data files and nothing else', () => {
+  assert.equal(isSeedOnlyFile('bug-log/bug-log.json'), true);
+  assert.equal(isSeedOnlyFile('scripts/flaky-suppressions.json'), true);
+  assert.equal(isSeedOnlyFile('scripts/thresholds.json'), true);
+  // normalises back-slashes on Windows-style paths
+  assert.equal(isSeedOnlyFile('scripts' + path.sep + 'thresholds.json'), true);
+  // unrelated files must return false
+  assert.equal(isSeedOnlyFile('playwright.config.js'), false);
+  assert.equal(isSeedOnlyFile('package.json'), false);
+  assert.equal(isSeedOnlyFile('scripts/analyze-flaky-tests.js'), false);
+});
+
+test('buildTemplateFileList lists managed files and skips excluded paths', async () => {
+  await withTmpCwd((tmp) => {
+    const root = path.join(tmp, 'template');
+    fs.mkdirSync(path.join(root, 'playwright', 'sensitive-data'), { recursive: true });
+    fs.mkdirSync(path.join(root, '.git'), { recursive: true });
+    fs.mkdirSync(path.join(root, 'node_modules', 'x'), { recursive: true });
+    fs.writeFileSync(path.join(root, 'playwright.config.js'), 'x');
+    fs.writeFileSync(path.join(root, 'package.json'), '{}');
+    fs.writeFileSync(path.join(root, '.git', 'HEAD'), 'ref');
+    fs.writeFileSync(path.join(root, 'node_modules', 'x', 'index.js'), 'y');
+    fs.writeFileSync(path.join(root, 'playwright', 'sensitive-data', 'dev-users.json'), '{}');
+    fs.writeFileSync(path.join(root, 'playwright', 'sensitive-data', 'env-users.example.json'), '{}');
+
+    const files = buildTemplateFileList(root);
+
+    assert.deepEqual(files, ['playwright.config.js', 'playwright/sensitive-data/env-users.example.json'].sort());
+  });
+});
+
+test('computeFilesToDelete returns files removed from the template only', () => {
+  const oldFiles = ['a.js', 'b.js', 'playwright/sensitive-data/dev-users.json'];
+  const newFiles = ['a.js'];
+  // b.js was removed; the sensitive user file must never be flagged for deletion.
+  assert.deepEqual(computeFilesToDelete(oldFiles, newFiles), ['b.js']);
+  assert.deepEqual(computeFilesToDelete(null, newFiles), []);
+});
+
+test('writeManifest / readManifest round-trip the installed file list', async () => {
+  await withTmpCwd((tmp) => {
+    const projectPath = path.join(tmp, 'project');
+    fs.mkdirSync(projectPath, { recursive: true });
+
+    writeManifest(projectPath, ['b.js', 'a.js'], '2.0.4');
+    const manifest = readManifest(projectPath);
+
+    assert.equal(manifest.version, '2.0.4');
+    assert.deepEqual(manifest.files, ['a.js', 'b.js']);
+    assert.equal(typeof manifest.updatedAt, 'string');
+  });
+});
+
+test('writeManifest deduplicates file paths so the manifest contains no duplicates', async () => {
+  await withTmpCwd((tmp) => {
+    const projectPath = path.join(tmp, 'project');
+    fs.mkdirSync(projectPath, { recursive: true });
+
+    writeManifest(projectPath, ['a.js', 'b.js', 'a.js', 'b.js'], '1.0.0');
+    const manifest = readManifest(projectPath);
+
+    assert.deepEqual(manifest.files, ['a.js', 'b.js']);
+  });
+});
+
+test('readManifest returns null when no manifest exists', async () => {
+  await withTmpCwd((tmp) => {
+    const projectPath = path.join(tmp, 'no-manifest');
+    fs.mkdirSync(projectPath, { recursive: true });
+    assert.equal(readManifest(projectPath), null);
+  });
+});
+
+test('getTemplateVersion reads the version from template package.json', async () => {
+  await withTmpCwd((tmp) => {
+    const templatePath = path.join(tmp, 'template');
+    fs.mkdirSync(templatePath, { recursive: true });
+    fs.writeFileSync(path.join(templatePath, 'package.json'), JSON.stringify({ version: '3.2.1' }));
+
+    assert.equal(getTemplateVersion(templatePath), '3.2.1');
+    assert.equal(getTemplateVersion(path.join(tmp, 'missing-template')), null);
+  });
+});
+
+test('syncTemplateFiles adds new files and only rewrites changed ones', async () => {
+  await withTmpCwd((tmp) => {
+    const template = path.join(tmp, 'template');
+    const project = path.join(tmp, 'project');
+    fs.mkdirSync(path.join(template, 'nested'), { recursive: true });
+    fs.mkdirSync(project, { recursive: true });
+
+    fs.writeFileSync(path.join(template, 'same.js'), 'unchanged');
+    fs.writeFileSync(path.join(template, 'nested', 'changed.js'), 'new-content');
+    fs.writeFileSync(path.join(template, 'added.js'), 'brand-new');
+
+    // Pre-existing project files: one identical, one differing.
+    fs.writeFileSync(path.join(project, 'same.js'), 'unchanged');
+    fs.mkdirSync(path.join(project, 'nested'), { recursive: true });
+    fs.writeFileSync(path.join(project, 'nested', 'changed.js'), 'old-content');
+
+    const result = syncTemplateFiles(project, template);
+
+    assert.equal(result.added, 1); // added.js
+    assert.equal(result.updated, 1); // nested/changed.js
+    assert.equal(fs.readFileSync(path.join(project, 'added.js'), 'utf8'), 'brand-new');
+    assert.equal(fs.readFileSync(path.join(project, 'nested', 'changed.js'), 'utf8'), 'new-content');
+    assert.deepEqual(result.newFiles, ['added.js', 'nested/changed.js', 'same.js']);
+  });
+});
+
+test('syncTemplateFiles seeds project data files but never overwrites them', async () => {
+  await withTmpCwd((tmp) => {
+    const template = path.join(tmp, 'template');
+    const project = path.join(tmp, 'project');
+    fs.mkdirSync(path.join(template, 'scripts'), { recursive: true });
+    fs.mkdirSync(path.join(template, 'bug-log'), { recursive: true });
+    fs.mkdirSync(path.join(project, 'scripts'), { recursive: true });
+
+    fs.writeFileSync(path.join(template, 'scripts', 'thresholds.json'), '{"template":true}');
+    fs.writeFileSync(path.join(template, 'bug-log', 'bug-log.json'), '[]');
+    fs.writeFileSync(path.join(project, 'scripts', 'thresholds.json'), '{"project":true}');
+
+    const result = syncTemplateFiles(project, template);
+
+    assert.equal(fs.readFileSync(path.join(project, 'scripts', 'thresholds.json'), 'utf8'), '{"project":true}');
+    assert.equal(fs.readFileSync(path.join(project, 'bug-log', 'bug-log.json'), 'utf8'), '[]');
+    assert.equal(result.added, 1);
+    assert.equal(result.updated, 0);
+    assert.deepEqual(result.newFiles, ['bug-log/bug-log.json', 'scripts/thresholds.json']);
+  });
+});
+
+test('every optional module file exists in the template', () => {
+  const root = path.resolve(__dirname, '..', '..');
+  for (const [key, module] of Object.entries(OPTIONAL_MODULES)) {
+    for (const file of module.files) {
+      assert.ok(fs.existsSync(path.join(root, file)), `${key}: ${file} is missing`);
+    }
+  }
+});
+
+test('local requires/imports of each optional module resolve to files the module ships', () => {
+  const root = path.resolve(__dirname, '..', '..');
+  const listFiles = (rel) => (fs.statSync(path.join(root, rel)).isDirectory() ? buildTemplateFileList(path.join(root, rel)).map((f) => `${rel.replace(/\/$/, '')}/${f}`) : [rel]);
+  const resolveLocal = (fromRel, spec) => {
+    const base = path.join(path.dirname(fromRel), spec).split(path.sep).join('/');
+    return [base, `${base}.js`, `${base}/index.js`].find((candidate) => fs.existsSync(path.join(root, candidate)) && fs.statSync(path.join(root, candidate)).isFile());
+  };
+
+  for (const [key, module] of Object.entries(OPTIONAL_MODULES)) {
+    const shipped = new Set(module.files.flatMap(listFiles));
+    for (const file of [...shipped].filter((f) => /\.(c|m)?js$/.test(f))) {
+      const source = fs.readFileSync(path.join(root, file), 'utf8');
+      const specs = [...source.matchAll(/(?:require\(\s*|from\s+)['"](\.{1,2}\/[^'"]+)['"]/g)].map((match) => match[1]);
+      for (const spec of specs) {
+        const target = resolveLocal(file, spec);
+        assert.ok(target && shipped.has(target), `${key}: ${file} needs ${spec}, which the module does not ship`);
+      }
+    }
+  }
+});
+
+test('optional module scripts and devDependencies match the template package.json', () => {
+  const pkg = JSON.parse(fs.readFileSync(path.resolve(__dirname, '..', '..', 'package.json'), 'utf8'));
+  for (const [key, module] of Object.entries(OPTIONAL_MODULES)) {
+    for (const [name, command] of Object.entries(module.scripts || {})) {
+      assert.equal(command, pkg.scripts[name], `${key}: script "${name}" differs from package.json`);
+    }
+    for (const dep of module.devDependencies || []) {
+      assert.ok(pkg.devDependencies[dep], `${key}: devDependency "${dep}" is not in package.json`);
+    }
+  }
+});
+
+test('deleteObsoleteFiles removes files gone from the template and prunes empty dirs', async () => {
+  await withTmpCwd((tmp) => {
+    const project = path.join(tmp, 'project');
+    fs.mkdirSync(path.join(project, 'old'), { recursive: true });
+    fs.writeFileSync(path.join(project, 'keep.js'), 'k');
+    fs.writeFileSync(path.join(project, 'old', 'gone.js'), 'g');
+
+    const deleted = deleteObsoleteFiles(project, ['keep.js', 'old/gone.js'], ['keep.js']);
+
+    assert.equal(deleted, 1);
+    assert.equal(fs.existsSync(path.join(project, 'old', 'gone.js')), false);
+    assert.equal(fs.existsSync(path.join(project, 'old')), false, 'empty directory should be pruned');
+    assert.equal(fs.existsSync(path.join(project, 'keep.js')), true);
+  });
+});
+
+test('deleteObsoleteFiles never removes user-owned sensitive files', async () => {
+  await withTmpCwd((tmp) => {
+    const project = path.join(tmp, 'project');
+    fs.mkdirSync(path.join(project, 'playwright', 'sensitive-data'), { recursive: true });
+    fs.writeFileSync(path.join(project, 'playwright', 'sensitive-data', 'dev-users.json'), '{}');
+
+    const deleted = deleteObsoleteFiles(project, ['playwright/sensitive-data/dev-users.json'], []);
+
+    assert.equal(deleted, 0);
+    assert.equal(fs.existsSync(path.join(project, 'playwright', 'sensitive-data', 'dev-users.json')), true);
+  });
+});
+
+test('createSensitiveDataFilesFromExample creates missing dev and qa files from the example', async () => {
+  await withTmpCwd((tmp) => {
+    const project = path.join(tmp, 'project');
+    const sensitiveData = path.join(project, 'playwright', 'sensitive-data');
+    fs.mkdirSync(sensitiveData, { recursive: true });
+    fs.writeFileSync(path.join(sensitiveData, 'env-users.example.json'), '{"example":true}\n');
+
+    const createdFiles = createSensitiveDataFilesFromExample(project);
+
+    assert.deepEqual(createdFiles, ['playwright/sensitive-data/dev-users.json', 'playwright/sensitive-data/qa-users.json']);
+    assert.equal(fs.readFileSync(path.join(sensitiveData, 'dev-users.json'), 'utf8'), '{"example":true}\n');
+    assert.equal(fs.readFileSync(path.join(sensitiveData, 'qa-users.json'), 'utf8'), '{"example":true}\n');
+  });
+});
+
+test('createSensitiveDataFilesFromExample preserves existing files unless overwrite is requested', async () => {
+  await withTmpCwd((tmp) => {
+    const project = path.join(tmp, 'project');
+    const sensitiveData = path.join(project, 'playwright', 'sensitive-data');
+    fs.mkdirSync(sensitiveData, { recursive: true });
+    fs.writeFileSync(path.join(sensitiveData, 'env-users.example.json'), '{"example":true}\n');
+    fs.writeFileSync(path.join(sensitiveData, 'dev-users.json'), '{"secret":true}\n');
+    fs.writeFileSync(path.join(sensitiveData, 'qa-users.json'), '{"secret":true}\n');
+
+    assert.deepEqual(createSensitiveDataFilesFromExample(project), []);
+    assert.equal(fs.readFileSync(path.join(sensitiveData, 'dev-users.json'), 'utf8'), '{"secret":true}\n');
+    assert.equal(fs.readFileSync(path.join(sensitiveData, 'qa-users.json'), 'utf8'), '{"secret":true}\n');
+
+    assert.deepEqual(createSensitiveDataFilesFromExample(project, { overwriteExisting: true }), ['playwright/sensitive-data/dev-users.json', 'playwright/sensitive-data/qa-users.json']);
+    assert.equal(fs.readFileSync(path.join(sensitiveData, 'dev-users.json'), 'utf8'), '{"example":true}\n');
+    assert.equal(fs.readFileSync(path.join(sensitiveData, 'qa-users.json'), 'utf8'), '{"example":true}\n');
+  });
+});
+
+test('runNpmInstall returns true when npm install succeeds', async () => {
+  await withTmpCwd((tmp) => {
+    const project = path.join(tmp, 'project');
+    fs.mkdirSync(project, { recursive: true });
+    fs.writeFileSync(path.join(project, 'package.json'), JSON.stringify({ name: 'ok-install', version: '1.0.0' }));
+
+    assert.equal(runNpmInstall(project), true);
+  });
+});
+
+test('runNpmInstall returns false when npm install exits non-zero', async () => {
+  await withTmpCwd((tmp) => {
+    const project = path.join(tmp, 'project');
+    fs.mkdirSync(project, { recursive: true });
+    fs.writeFileSync(path.join(project, 'package.json'), JSON.stringify({ name: 'failed-install', version: '1.0.0', scripts: { preinstall: 'node -e "process.exit(7)"' } }));
+
+    assert.equal(runNpmInstall(project), false);
+  });
+});
+
+test('updateProject applies latest template in place, deletes obsolete files, preserves credentials, and stages only project changes', async () => {
+  await withTmpCwd(async (tmp) => {
+    const template = path.join(tmp, 'template-source');
+    const project = path.join(tmp, 'project');
+
+    fs.mkdirSync(path.join(template, 'playwright', 'sensitive-data'), { recursive: true });
+    fs.writeFileSync(path.join(template, 'playwright.config.js'), 'module.exports = { e2e: { baseUrl: "https://new.example" } };\n');
+    fs.writeFileSync(path.join(template, 'new-template-file.js'), 'new template file\n');
+    fs.writeFileSync(path.join(template, 'playwright', 'sensitive-data', 'env-users.example.json'), '{"example":true}\n');
+    fs.writeFileSync(path.join(template, 'package.json'), JSON.stringify({ version: '9.9.9', devDependencies: { eslint: '^10.0.0', glob: '^13.0.0' } }, null, 2) + '\n');
+
+    runGit(template, ['init']);
+    runGit(template, ['config', 'user.email', 'test@example.com']);
+    runGit(template, ['config', 'user.name', 'Test User']);
+    runGit(template, ['add', '-A']);
+    runGit(template, ['commit', '-m', 'template']);
+
+    fs.mkdirSync(path.join(project, 'playwright', 'sensitive-data'), { recursive: true });
+    fs.writeFileSync(path.join(project, 'playwright.config.js'), 'module.exports = { e2e: { baseUrl: "https://old.example" } };\n');
+    fs.writeFileSync(path.join(project, 'obsolete-template-file.js'), 'remove me\n');
+    fs.writeFileSync(path.join(project, 'playwright', 'sensitive-data', 'dev-users.json'), '{"token":"secret"}\n');
+    fs.writeFileSync(path.join(project, 'package.json'), JSON.stringify({ name: 'existing-app', scripts: { start: 'node app.js' } }, null, 2) + '\n');
+    writeManifest(project, ['playwright.config.js', 'obsolete-template-file.js', 'playwright/sensitive-data/dev-users.json'], '1.0.0');
+
+    runGit(project, ['init']);
+    runGit(project, ['config', 'user.email', 'test@example.com']);
+    runGit(project, ['config', 'user.name', 'Test User']);
+    runGit(project, ['add', '-A']);
+    runGit(project, ['commit', '-m', 'before update']);
+
+    const previousTemplateUrl = process.env.PLAYWRIGHT_START_TEMPLATE_URL;
+    process.env.PLAYWRIGHT_START_TEMPLATE_URL = template;
+    try {
+      const result = await updateProject(project);
+
+      assert.equal(result.gitAvailable, true);
+      assert.equal(result.added, 2);
+      assert.equal(result.updated, 1);
+      assert.equal(result.deleted, 1);
+      assert.equal(result.templateVersion, '9.9.9');
+    } finally {
+      if (previousTemplateUrl === undefined) {
+        delete process.env.PLAYWRIGHT_START_TEMPLATE_URL;
+      } else {
+        process.env.PLAYWRIGHT_START_TEMPLATE_URL = previousTemplateUrl;
+      }
+    }
+
+    assert.equal(fs.readFileSync(path.join(project, 'playwright.config.js'), 'utf8'), 'module.exports = { e2e: { baseUrl: "https://new.example" } };\n');
+    assert.equal(fs.readFileSync(path.join(project, 'new-template-file.js'), 'utf8'), 'new template file\n');
+    assert.equal(fs.existsSync(path.join(project, 'obsolete-template-file.js')), false);
+    assert.equal(fs.readFileSync(path.join(project, 'playwright', 'sensitive-data', 'dev-users.json'), 'utf8'), '{"token":"secret"}\n');
+    assert.equal(fs.readFileSync(path.join(project, 'playwright', 'sensitive-data', 'qa-users.json'), 'utf8'), '{"example":true}\n');
+
+    const pkg = JSON.parse(fs.readFileSync(path.join(project, 'package.json'), 'utf8'));
+    assert.equal(pkg.name, 'existing-app');
+    assert.equal(pkg.scripts.start, 'node app.js');
+    assert.equal(pkg.scripts.validate, OPTIONAL_MODULES.guidanceCheck.scripts.validate);
+
+    const status = runGit(project, ['status', '--porcelain']);
+    const stagedChanges = status.split('\n');
+    assert.ok(stagedChanges.includes('M  .playwright-start-manifest.json'));
+    assert.ok(stagedChanges.includes('M  playwright.config.js'));
+    assert.ok(stagedChanges.includes('A  playwright/sensitive-data/env-users.example.json'));
+    assert.ok(stagedChanges.includes('A  playwright/sensitive-data/qa-users.json'));
+    assert.ok(stagedChanges.includes('A  new-template-file.js'));
+    assert.ok(stagedChanges.includes('D  obsolete-template-file.js'));
+    assert.ok(stagedChanges.includes('M  package.json'));
+    assert.doesNotMatch(status, /temp-playwright-start-update|template-source/);
+
+    for (const line of stagedChanges) {
+      assert.equal(line[1], ' ', `expected staged-only change, got: ${line}`);
+    }
+  });
+});
+
+// --- installFullIntoExistingDirectory ---------------------------------------
+
+test('installFullIntoExistingDirectory copies all template files into an existing directory without touching .git', async () => {
+  await withTmpCwd(async (tmp) => {
+    // Prepare a minimal fake template served locally
+    const templateSource = path.join(tmp, 'template-source');
+    fs.mkdirSync(path.join(templateSource, 'playwright', 'sensitive-data'), { recursive: true });
+    fs.writeFileSync(path.join(templateSource, 'playwright.config.js'), 'module.exports = {};\n');
+    fs.writeFileSync(path.join(templateSource, 'playwright', 'sensitive-data', 'env-users.example.json'), '{"user":"example"}\n');
+    fs.writeFileSync(path.join(templateSource, 'package.json'), JSON.stringify({ version: '9.9.9', devDependencies: {} }) + '\n');
+    runGit(templateSource, ['init']);
+    runGit(templateSource, ['add', '-A']);
+    runGit(templateSource, ['commit', '-m', 'init', '--allow-empty']);
+
+    // Prepare the project — an existing directory with its own git history
+    const project = path.join(tmp, 'existing-project');
+    fs.mkdirSync(project, { recursive: true });
+    fs.writeFileSync(path.join(project, 'my-file.js'), '// my code\n');
+    runGit(project, ['init']);
+    runGit(project, ['add', '-A']);
+    runGit(project, ['commit', '-m', 'initial commit', '--allow-empty']);
+
+    const previousTemplateUrl = process.env.PLAYWRIGHT_START_TEMPLATE_URL;
+    process.env.PLAYWRIGHT_START_TEMPLATE_URL = templateSource;
+    try {
+      await installFullIntoExistingDirectory(project);
+    } finally {
+      if (previousTemplateUrl === undefined) {
+        delete process.env.PLAYWRIGHT_START_TEMPLATE_URL;
+      } else {
+        process.env.PLAYWRIGHT_START_TEMPLATE_URL = previousTemplateUrl;
+      }
+    }
+
+    // Template files should have been copied
+    assert.ok(fs.existsSync(path.join(project, 'playwright.config.js')), 'playwright.config.js should be copied');
+    // Original user file must be preserved
+    assert.ok(fs.existsSync(path.join(project, 'my-file.js')), 'user file must not be deleted');
+    // .git must still be the original repo (not wiped/re-inited)
+    assert.ok(fs.existsSync(path.join(project, '.git')), '.git must be preserved');
+    // Manifest should be written
+    const manifest = readManifest(project);
+    assert.ok(manifest, 'manifest should be written');
+    assert.ok(manifest.files.includes('playwright.config.js'), 'manifest should list copied files');
+    assert.equal(fs.readFileSync(path.join(project, 'playwright', 'sensitive-data', 'dev-users.json'), 'utf8'), '{"user":"example"}\n');
+    assert.equal(fs.readFileSync(path.join(project, 'playwright', 'sensitive-data', 'qa-users.json'), 'utf8'), '{"user":"example"}\n');
+    // bin/ must not be copied
+    assert.equal(fs.existsSync(path.join(project, 'bin')), false, 'bin/ must not be copied into project');
+  });
+});
+
+test('every file listed in OPTIONAL_MODULES exists in the template', () => {
+  const root = path.resolve(__dirname, '..', '..');
+  const missing = Object.entries(OPTIONAL_MODULES).flatMap(([key, mod]) => (mod.files || []).filter((f) => !fs.existsSync(path.join(root, f))).map((f) => `${key}: ${f}`));
+  assert.deepEqual(missing, []);
+});
